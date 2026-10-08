@@ -104,6 +104,20 @@ def identify(transcript, short):
     return ans, dt, src
 
 
+def append_entry(entry):
+    js = []
+    if os.path.exists(JOURNAL):
+        try:
+            with open(JOURNAL, encoding="utf-8") as f:
+                js = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            sys.exit("Error: journal.json is corrupt.")
+    js.append(entry)
+    with open(JOURNAL, "w", encoding="utf-8") as f:
+        json.dump(js, f, indent=2)
+    return len(js)
+
+
 def save_note(transcript, region):
     all_sp = load_species(region)
     short = shortlist(transcript, all_sp)
@@ -129,17 +143,7 @@ def save_note(transcript, region):
              "region": region, "shortlist": ids, "model_answer": ans, "confirmed_label": u,
              "correct": bool(ans["candidates"] and u == top), "in_top3": u in top3,
              "in_shortlist": u in ids, "confidence_source": src, "latency_s": dt}
-    js = []
-    if os.path.exists(JOURNAL):
-        try:
-            with open(JOURNAL, encoding="utf-8") as f:
-                js = json.load(f)
-        except (json.JSONDecodeError, ValueError):
-            sys.exit("Error: journal.json is corrupt.")
-    js.append(entry)
-    with open(JOURNAL, "w", encoding="utf-8") as f:
-        json.dump(js, f, indent=2)
-    print(f"Saved ({len(js)} entries). correct={entry['correct']}")
+    print(f"Saved ({append_entry(entry)} entries). correct={entry['correct']}")
 
 
 def cmd_listen(_a):

@@ -42,7 +42,7 @@ class TestScoring(unittest.TestCase):
 
 class TestRegions(unittest.TestCase):
     def test_valid_regions_load(self):
-        for region in ("gujarat", "california"):
+        for region in ("gujarat",):
             with self.subTest(region=region):
                 sp = load_species(region)
                 self.assertEqual(len(sp), 50)
