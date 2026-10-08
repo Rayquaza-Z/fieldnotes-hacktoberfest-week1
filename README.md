@@ -1,7 +1,7 @@
 # 🌿 Fieldnotes
 
-**An offline, voice-first nature journal.** Speak outdoors — it tells you what
-you just saw. No internet, no account, no cloud.
+**An offline, voice-first nature journal.** Speak outdoors — it suggests likely matches
+from a 50-species checklist. No internet, no account, no cloud.
 
 ![Fieldnotes demo](docs/demo.gif)
 
@@ -11,10 +11,10 @@ you just saw. No internet, no account, no cloud.
 
 ## What it does
 
-Fieldnotes identifies birds, plants, and insects from a spoken description and
-logs each sighting to a GPS-tagged journal. The full pipeline — speech
-recognition, shortlisting, and reasoning — runs on your own machine, so it
-works identically with zero signal in the field.
+Fieldnotes suggests likely bird, plant, and insect matches from a spoken
+description and logs each sighting to a GPS-tagged journal. The full pipeline
+— speech recognition, shortlisting, and reasoning — runs on your own machine,
+so it works identically with zero signal in the field.
 
 ## Design principles
 
@@ -51,6 +51,42 @@ typed text ───────────────────────
                          confirm the sighting ──▶ journal.json (+ GPS, device, latency)
 ```
 
+## Field test results
+
+Simulated field day: 10 typed observations through the full pipeline
+(shortlist → local model → confirm), including two Whisper-style
+mistranscriptions (`beak→bake`, `tail→tale`, `bulbul→bull bull`) and two
+subjects outside the 50-species checklist. Typed input stands in for the mic;
+live-audio accuracy will be lower.
+
+`python fieldnotes.py stats` after the session:
+
+```
+entries: 10
+top-1 hit rate: 5/10 = 0.50
+top-3 hit rate: 7/10 = 0.70
+shortlist coverage: 8/10 = 0.80
+grounding violations: 0
+```
+
+The misses: banyan went to peepal (right shortlist, wrong pick), plain tiger
+went to carpenter bee, cattle egret went to myna on retry — and one egret run
+crashed the model outright (HTTP 500, token repeat limit, no entry saved).
+Both mangled transcripts still resolved correctly. Both off-list subjects were
+correctly rejected with `none`, which counts against coverage by design — the
+checklist ends at 50 species.
+
+## Limitations
+
+- The 50-species checklist is hand-built and not expert-verified; similar
+  species are easy to confuse (see banyan/peepal above).
+- A 1B model's confidences are not calibrated — treat them as ordering, not
+  probabilities.
+- The first run downloads the Whisper model (~150 MB) and needs internet once;
+  after that everything is offline.
+- Voice input and GPS tagging need localhost or HTTPS (browser policy), and
+  the model can fail outright on some inputs rather than answering badly.
+
 ## Quick start
 
 Prerequisites: Python 3.11+, [Ollama](https://ollama.com) with `gemma3:1b`
@@ -66,10 +102,13 @@ ollama pull gemma3:1b
 **Browser app (recommended):** double-click `start-fieldnotes.bat` and keep its
 window open — that window is the server. It opens `http://127.0.0.1:8765`:
 tap the mic and speak, or expand *"or describe it in words"* to type, then tap
-the match (or *None of these*). On a phone, use Add to Home Screen. A red
-*Server unreachable* banner means the server window was closed — restart it
-and hit Retry. Microphones require localhost or HTTPS, which this setup
-satisfies.
+the match (or *None of these*). On a phone, Add to Home Screen installs the
+full-screen app shell. One honest caveat: browsers grant the microphone and
+GPS only on localhost or HTTPS, so the full voice flow runs on the machine
+hosting the server. From a phone over plain HTTP the typed flow works, but
+voice and GPS tagging are blocked by the browser — serve over HTTPS for the
+complete mobile experience. A red *Server unreachable* banner means the
+server window was closed — restart it and hit Retry.
 
 **Terminal:**
 
