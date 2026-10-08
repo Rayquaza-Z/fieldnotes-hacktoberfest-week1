@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -20,7 +21,7 @@ MANIFEST = {"name": "Fieldnotes", "short_name": "Fieldnotes", "start_url": "/",
             "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
                       {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}]}
 
-SW = """const C = 'fieldnotes-v1';
+SW = """const C = 'fieldnotes-v4';
 const ASSETS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(C).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -72,6 +73,7 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="theme-color" content="#4c6b4f">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234c6b4f'/%3E%3Ccircle cx='32' cy='32' r='17' fill='%23f6f4ec'/%3E%3Crect x='24' y='22' width='5' height='14' rx='2' fill='%234c6b4f'/%3E%3Crect x='30' y='18' width='5' height='22' rx='2' fill='%234c6b4f'/%3E%3Crect x='36' y='24' width='5' height='12' rx='2' fill='%234c6b4f'/%3E%3C/svg%3E">
 <style>
 :root{
   --paper:#f6f4ec; --card:#fffdf7; --ink:#2c2a24; --muted:#8b8474;
@@ -140,10 +142,46 @@ main{width:100%;max-width:560px;padding:2.5em 1.5em 1em;text-align:center}
 @keyframes spin{to{transform:rotate(360deg)}}
 footer{margin-top:auto;padding:1.6em;color:var(--muted);font-size:.8em;text-align:center}
 #devline{font-size:.78em;color:var(--muted);margin:.2em 0 0;text-align:center}
+#bg{position:fixed;inset:0;z-index:0;pointer-events:none}
+main,footer{position:relative;z-index:1}
+.orb{position:fixed;border-radius:50%;filter:blur(70px);z-index:0;pointer-events:none;opacity:.55}
+.o1{width:44vmax;height:44vmax;left:-12vmax;top:-12vmax;background:radial-gradient(circle,#dbe4cd,transparent 70%);animation:drift1 26s ease-in-out infinite alternate}
+.o2{width:40vmax;height:40vmax;right:-10vmax;bottom:-8vmax;background:radial-gradient(circle,#f0dfbb,transparent 70%);animation:drift2 32s ease-in-out infinite alternate}
+@keyframes drift1{to{transform:translate(6vmax,4vmax) scale(1.1)}}
+@keyframes drift2{to{transform:translate(-5vmax,-5vmax) scale(1.08)}}
+#srvwarn{background:#f7e3de;border:1px solid #d8a49b;color:#8f3d32;border-radius:12px;
+  padding:.6em 1em;font-size:.88em;margin-bottom:1em}
+.cand{animation:fadeUp .45s both;animation-delay:calc(var(--i,0)*80ms)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.orb,#mic,.cand{animation:none}}
+#coll{width:100%;margin:2.4em 0 0;text-align:left}
+#coll h2{font-family:Georgia,serif;font-weight:400;font-size:1.2em;margin:0 0 .7em;text-align:center}
+.collhead{display:flex;gap:1em;align-items:center;justify-content:center;margin-bottom:1em}
+.ringwrap{position:relative;width:88px;height:88px;flex:none}
+.ringwrap b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:Georgia,serif;font-weight:400;font-size:1em}
+#ring{width:88px;height:88px;transform:rotate(-90deg)}
+#ring .track{fill:none;stroke:var(--line);stroke-width:8}
+#ringfg{fill:none;stroke:var(--sage);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset 1.2s ease}
+.streak{display:inline-block;background:var(--sage);color:#fff;border-radius:999px;
+  padding:.3em 1em;font-size:.88em}
+.streak.off{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.small{font-size:.82em}.muted{color:var(--muted)}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:.45em}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:.55em .4em;
+  font-size:.74em;text-align:center;line-height:1.4;animation:fadeUp .4s both}
+.chip b{display:block;font-size:1.02em}
+.chip .cat{opacity:.75}
+.chip .n{color:#fff;background:var(--sage);border-radius:999px;padding:0 .55em;white-space:nowrap}
+.chip.got{border-color:var(--sage);background:#edf1e3}
+.chip.miss{color:var(--muted);border-style:dashed}
+#fx{position:fixed;inset:0;z-index:50;pointer-events:none}
 @media (pointer:coarse){#mic{width:168px;height:168px}#mic svg{width:64px;height:64px}
 main{padding-top:1.2em}.cand{padding:.95em 1em;font-size:1.05em}.btn{padding:.85em 2.1em}}
 </style></head><body>
+<canvas id="bg"></canvas><div class="orb o1"></div><div class="orb o2"></div><canvas id="fx"></canvas>
 <main>
+  <div id="srvwarn" hidden>Server unreachable — double-click <b>start-fieldnotes.bat</b> and keep its window open. <button class="linklike" style="margin:0" onclick="ping()">Retry</button><br><span id="srvwhy"></span></div>
   <p class="brand">Fieldnotes</p>
   <p class="tag">speak &middot; identify &middot; log</p>
   <div class="pills" id="pills"></div>
@@ -159,6 +197,14 @@ main{padding-top:1.2em}.cand{padding:.95em 1em;font-size:1.05em}.btn{padding:.85
       <button class="btn" onclick="fromText()">Identify</button>
     </div>
   </div>
+  <section id="coll">
+    <h2>Field collection</h2>
+    <div class="collhead">
+      <div class="ringwrap"><svg id="ring" viewBox="0 0 84 84"><circle class="track" cx="42" cy="42" r="34"></circle><circle id="ringfg" cx="42" cy="42" r="34"></circle></svg><b id="ringtxt">0/0</b></div>
+      <div><span id="streak" class="streak off">…</span><div class="muted small">??? hides the unfound — go find them all.</div></div>
+    </div>
+    <div id="grid"></div>
+  </section>
   <p id="err" class="err"></p>
 </main>
 <div id="devline"></div>
@@ -182,10 +228,63 @@ async function load() {
     `<button class="pill${x === REGION ? ' on' : ''}" onclick="setRegion('${x}')">${x}</button>`).join('');
   showStats(await api('/api/stats'));
 }
-function setRegion(x) { REGION = x; load(); }
+const HINTS = ['Tap the microphone and describe what you see',
+  'The trail is calling — what is moving out there?',
+  'Small? Brown? Loud? Every detail helps.',
+  'Your collection grows one sighting at a time.'];
+let hinti = 1, idleMode = true;
+setInterval(() => { if (idleMode && !rec && !cur) setStatus(HINTS[hinti++ % HINTS.length]); }, 7000);
+async function loadCollection() {
+  const c = await api('/api/collection?region=' + REGION).catch(() => null);
+  if (!c || !c.total) return;
+  const C = 2 * Math.PI * 34;
+  ringfg.style.strokeDasharray = C;
+  ringfg.style.strokeDashoffset = C * (1 - c.found / c.total);
+  ringtxt.textContent = c.found + '/' + c.total;
+  streak.textContent = c.streak > 0 ? c.streak + '-day streak' : 'no streak yet — log today';
+  streak.className = 'streak' + (c.streak > 0 ? '' : ' off');
+  grid.innerHTML = c.species.map(s => s.n
+    ? `<div class="chip got"><b>${s.name}</b><span class="cat">${s.cat} · ${s.id}</span> <span class="n">×${s.n}</span></div>`
+    : `<div class="chip miss"><b>???</b><span class="cat">${s.cat}</span></div>`).join('');
+}
+function boom() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  fx.width = innerWidth; fx.height = innerHeight;
+  const x = fx.getContext('2d');
+  const cols = ['#4c6b4f', '#e0a44a', '#c05b4d', '#7fa3c7', '#f0dfbb'];
+  const ps = Array.from({length: 90}, () => ({x: innerWidth / 2 + (Math.random() - .5) * 120,
+    y: innerHeight * 0.35, vx: (Math.random() - .5) * 9, vy: -4 - Math.random() * 6,
+    s: 4 + Math.random() * 6, r: Math.random() * 6.28, vr: (Math.random() - .5) * .3,
+    col: cols[Math.random() * cols.length | 0], life: 70 + Math.random() * 40}));
+  (function tick() {
+    x.clearRect(0, 0, fx.width, fx.height);
+    let alive = false;
+    for (const p of ps) {
+      if (p.life-- <= 0) continue; alive = true;
+      p.x += p.vx; p.y += p.vy; p.vy += .22; p.r += p.vr;
+      x.save(); x.translate(p.x, p.y); x.rotate(p.r);
+      x.fillStyle = p.col; x.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * .66); x.restore();
+    }
+    if (alive) requestAnimationFrame(tick); else x.clearRect(0, 0, fx.width, fx.height);
+  })();
+}
+function chime() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    [523, 784].forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.frequency.value = f; o.type = 'sine';
+      const t = actx.currentTime + i * .12;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.18, t + .03);
+      g.gain.exponentialRampToValueAtTime(.001, t + .4);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + .45);
+    });
+  } catch (e) {}
+}
+function setRegion(x) { REGION = x; load(); loadCollection(); }
 function showStats(s) {
   stats.textContent = s.entries
-    ? `${s.entries} entr${s.entries === 1 ? 'y' : 'ies'} · top-1 ${s.top1} · top-3 ${s.top3} · shortlist ${s.coverage}`
+    ? `${s.entries} entr${s.entries === 1 ? 'y' : 'ies'} · top-1 ${s.top1} · top-3 ${s.top3} · shortlist ${s.coverage} · ${s.streak}-day streak`
     : 'No entries yet — go outside and find something.';
 }
 function setStatus(t) { status.innerHTML = t; }
@@ -261,9 +360,10 @@ async function fromText() {
   render(d);
 }
 function render(d) {
+  idleMode = false;
   work.innerHTML = `<div class="card"><p class="follow">${d.followup.replace(/</g, '&lt;')}</p>` +
-    d.candidates.map(c =>
-      `<button class="cand" onclick="pick('${c.id}')"><span class="cf">${c.confidence.toFixed(2)}</span>` +
+    d.candidates.map((c, i) =>
+      `<button class="cand" style="--i:${i}" onclick="pick('${c.id}')"><span class="cf">${c.confidence.toFixed(2)}</span>` +
       `<span class="nm">${c.common_name.replace(/</g, '&lt;')}</span> <span class="id">${c.id}</span>` +
       `<span class="bar"><i style="width:${Math.round(c.confidence * 100)}%"></i></span></button>`).join('') +
     `<button class="ghost" onclick="pick('none')">None of these — the right one isn't listed</button>` +
@@ -277,9 +377,11 @@ async function pick(id) {
     `<button class="ghost" onclick="again()">Identify another</button></div>`;
   setStatus('Nice spot. ' + (d.entry.confidence_source === 'rank' ? 'Confidence is rank-based.' : ''));
   showStats(d.stats);
+  loadCollection();
+  boom(); chime();
 }
 function again() {
-  work.innerHTML = ''; cur = null;
+  work.innerHTML = ''; cur = null; idleMode = true;
   setStatus('Tap the microphone and describe what you see');
 }
 const MOBILE = matchMedia('(pointer:coarse)').matches || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
@@ -298,9 +400,71 @@ function locate() {
     () => paintLoc(), {timeout: 9000});
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-load();
+async function ping() {
+  if (location.protocol === 'file:') {
+    srvwarn.hidden = false;
+    srvwhy.textContent = 'This file was opened directly — it only works when served via start-fieldnotes.bat.';
+    return;
+  }
+  try {
+    const r = await fetch('/api/stats');
+    srvwarn.hidden = r.ok;
+    if (!r.ok) srvwhy.textContent = 'Server answered ' + r.status + ' — restart start-fieldnotes.bat.';
+  } catch (e) {
+    srvwarn.hidden = false;
+    srvwhy.textContent = 'No answer on 127.0.0.1:8765 — is the black server window still open?';
+  }
+}
+function bgEngine() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const c = bg.getContext('2d');
+  const cols = ['76,107,79', '139,143,63', '190,128,72', '107,142,110'];
+  const N = innerWidth < 600 ? 14 : 26;
+  const spawn = any => ({x: Math.random() * innerWidth, y: any ? Math.random() * innerHeight : innerHeight + 20,
+    s: 4 + Math.random() * 9, a: Math.random() * 6.28, vy: .18 + Math.random() * .4,
+    ph: Math.random() * 6.28, sp: .004 + Math.random() * .01,
+    col: cols[Math.random() * cols.length | 0], al: .10 + Math.random() * .16});
+  const ps = Array.from({length: N}, () => spawn(true));
+  addEventListener('resize', () => { bg.width = innerWidth; bg.height = innerHeight; });
+  bg.width = innerWidth; bg.height = innerHeight;
+  (function tick() {
+    requestAnimationFrame(tick);
+    if (document.hidden) return;
+    c.clearRect(0, 0, bg.width, bg.height);
+    for (let i = 0; i < ps.length; i++) {
+      const p = ps[i];
+      p.y -= p.vy; p.ph += .01; p.a += p.sp;
+      p.x += Math.sin(p.ph) * .3;
+      if (p.y < -24) { ps[i] = spawn(false); continue; }
+      c.save(); c.translate(p.x, p.y); c.rotate(p.a);
+      c.fillStyle = `rgba(${p.col},${p.al})`;
+      c.beginPath(); c.ellipse(0, 0, p.s, p.s * .55, 0, 0, 6.29); c.fill();
+      c.restore();
+    }
+  })();
+}
+bgEngine();
+ping(); setInterval(ping, 15000);
+load(); loadCollection();
 locate();
 </script></body></html>"""
+
+
+def day_streak(js):
+    import datetime as dt
+    days = sorted({e["timestamp"][:10] for e in js if e.get("timestamp")}, reverse=True)
+    if not days:
+        return 0
+    today = dt.date.today()
+    cur = today if days[0] == today.isoformat() else today - dt.timedelta(days=1)
+    if days[0] != cur.isoformat():
+        return 0
+    have = set(days)
+    n = 0
+    while cur.isoformat() in have:
+        n += 1
+        cur -= dt.timedelta(days=1)
+    return n
 
 
 def stats():
@@ -314,7 +478,30 @@ def stats():
             "top1": round(sum(1 for e in js if e.get("correct")) / n, 2) if n else 0,
             "top3": round(sum(1 for e in js if e.get("in_top3")) / n, 2) if n else 0,
             "coverage": round(sum(1 for e in js if e.get("in_shortlist")) / n, 2) if n else 0,
+            "streak": day_streak(js),
+            "unique": len({e.get("confirmed_label") for e in js
+                           if e.get("confirmed_label") not in ("", "none", None)}),
             "violations": sum(1 for e in js if e.get("model_answer", {}).get("grounding_violation"))}
+
+
+def do_collection(region):
+    try:
+        species = fn.load_species(region)
+    except SystemExit:
+        species = []
+    try:
+        with open(fn.JOURNAL, encoding="utf-8") as f:
+            js = json.load(f)
+    except (OSError, ValueError):
+        js = []
+    seen = {}
+    for e in js:
+        if e.get("region") == region and e.get("confirmed_label") not in ("", "none", None):
+            seen[e["confirmed_label"]] = seen.get(e["confirmed_label"], 0) + 1
+    found = [{"id": s["id"], "name": s["common_name"], "cat": s["category"],
+              "n": seen.get(s["id"], 0)} for s in species]
+    return {"total": len(species), "found": sum(1 for f in found if f["n"]),
+            "species": found, "streak": day_streak(js)}
 
 
 def do_identify(data):
@@ -416,6 +603,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"regions": fn.regions()})
         elif self.path == "/api/stats":
             self._json(stats())
+        elif self.path.startswith("/api/collection"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._json(do_collection((q.get("region") or ["gujarat"])[0]))
         elif self.path == "/manifest.json":
             self._json(MANIFEST)
         elif self.path == "/sw.js":
